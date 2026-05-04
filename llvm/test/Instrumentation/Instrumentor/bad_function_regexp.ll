@@ -1,0 +1,13 @@
+; RUN: not opt < %s -passes=instrumentor -instrumentor-read-config-file=%S/bad_function_regex.json -S 2>&1 | FileCheck %s
+
+; CHECK: error: failed to parse target regex: repetition-operator operand invalid
+
+target datalayout = "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
+
+define i32 @foo() {
+entry:
+  %0 = alloca i32, align 4
+  store i32 0, ptr %0, align 4
+  %2 = load i32, ptr %0, align 4
+  ret i32 %2
+}

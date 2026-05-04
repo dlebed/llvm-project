@@ -161,6 +161,9 @@ private:
   /// The instrumentor configuration.
   InstrumentationConfig &IConf;
 
+  /// The function regex filter, if any.
+  Regex ParsedFunctionRegex;
+
   /// The underlying module.
   Module &M;
 
@@ -176,13 +179,13 @@ bool InstrumentorImpl::shouldInstrumentTarget() {
   const bool IsGPU = T.isAMDGPU() || T.isNVPTX();
 
   bool RegexMatches = true;
-  const auto TargetRegexStr = IConf.TargetRegex->getString();
+  StringRef TargetRegexStr = IConf.TargetRegex->getString();
   if (!TargetRegexStr.empty()) {
-    llvm::Regex TargetRegex(TargetRegexStr);
+    Regex TargetRegex(TargetRegexStr);
     std::string ErrMsg;
     if (!TargetRegex.isValid(ErrMsg)) {
       IIRB.Ctx.diagnose(DiagnosticInfoInstrumentation(
-          Twine("failed to parse target regex: ") + ErrMsg, DS_Warning));
+          Twine("failed to parse target regex: ") + ErrMsg, DS_Error));
       return false;
     }
     RegexMatches = TargetRegex.match(T.str());
@@ -197,7 +200,11 @@ bool InstrumentorImpl::shouldInstrumentTarget() {
 bool InstrumentorImpl::shouldInstrumentFunction(Function &Fn) {
   if (Fn.isDeclaration())
     return false;
-  return !Fn.getName().starts_with(IConf.getRTName()) ||
+  bool RegexMatches = true;
+  StringRef FunctionRegexStr = IConf.FunctionRegex->getString();
+  if (!FunctionRegexStr.empty())
+    RegexMatches = ParsedFunctionRegex.match(Fn.getName());
+  return (RegexMatches && !Fn.getName().starts_with(IConf.getRTName())) ||
          Fn.hasFnAttribute("instrument");
 }
 
@@ -281,6 +288,17 @@ bool InstrumentorImpl::instrument() {
   bool Changed = false;
   if (!shouldInstrumentTarget())
     return Changed;
+
+  StringRef FunctionRegexStr = IConf.FunctionRegex->getString();
+  if (!FunctionRegexStr.empty()) {
+    ParsedFunctionRegex = Regex(FunctionRegexStr);
+    std::string ErrMsg;
+    if (!ParsedFunctionRegex.isValid(ErrMsg)) {
+      IIRB.Ctx.diagnose(DiagnosticInfoInstrumentation(
+          Twine("failed to parse target regex: ") + ErrMsg, DS_Error));
+      return false;
+    }
+  }
 
   for (auto &[Name, IO] :
        IConf.IChoices[InstrumentationLocation::INSTRUCTION_PRE])
