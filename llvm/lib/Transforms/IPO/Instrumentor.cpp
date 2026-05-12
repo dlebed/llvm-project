@@ -452,6 +452,391 @@ Value *InstrumentationOpportunity::getIdPost(Value &V, Type &Ty,
   return getCI(&Ty, -getIdFromEpoch(IIRB.Epoch), /*IsSigned=*/true);
 }
 
+namespace {
+/// Simple filter expression evaluator for instrumentation opportunities.
+/// Supports integer comparisons (==, !=, <, >, <=, >=), string comparisons
+/// (==, !=), string prefix checks (startswith), and logical operators (&&, ||).
+class FilterEvaluator {
+  StringRef Expr;
+  DenseMap<StringRef, int64_t> IntPropertyValues;
+  DenseMap<StringRef, StringRef> StringPropertyValues;
+  size_t Pos = 0;
+  std::string ErrorMsg;
+
+public:
+  FilterEvaluator(StringRef Expr,
+                  DenseMap<StringRef, int64_t> &&IntPropertyValues,
+                  DenseMap<StringRef, StringRef> &&StringPropertyValues)
+      : Expr(Expr), IntPropertyValues(std::move(IntPropertyValues)),
+        StringPropertyValues(std::move(StringPropertyValues)), Pos(0) {}
+
+  bool evaluate() {
+    if (Expr.empty())
+      return true;
+    bool Result = parseOrExpr();
+
+    // Check if we consumed the entire expression
+    skipWhitespace();
+    if (Pos < Expr.size() && ErrorMsg.empty()) {
+      ErrorMsg =
+          "unexpected characters at position " + std::to_string(Pos) + ": '" +
+          Expr.substr(Pos, std::min<size_t>(10, Expr.size() - Pos)).str() + "'";
+    }
+
+    return Result;
+  }
+
+  bool hasError() const { return !ErrorMsg.empty(); }
+  StringRef getError() const { return ErrorMsg; }
+
+private:
+  void skipWhitespace() {
+    while (Pos < Expr.size() && std::isspace(Expr[Pos]))
+      ++Pos;
+  }
+
+  bool parseOrExpr() {
+    bool Result = parseAndExpr();
+    while (true) {
+      skipWhitespace();
+      if (Pos + 1 < Expr.size() && Expr[Pos] == '|' && Expr[Pos + 1] == '|') {
+        Pos += 2;
+        Result = parseAndExpr() || Result;
+      } else {
+        break;
+      }
+    }
+    return Result;
+  }
+
+  bool parseAndExpr() {
+    bool Result = parseComparison();
+    while (true) {
+      skipWhitespace();
+      if (Pos + 1 < Expr.size() && Expr[Pos] == '&' && Expr[Pos + 1] == '&') {
+        Pos += 2;
+        Result = parseComparison() && Result;
+      } else {
+        break;
+      }
+    }
+    return Result;
+  }
+
+  // Parse a quoted string literal
+  std::optional<StringRef> parseStringLiteral() {
+    skipWhitespace();
+    if (Pos >= Expr.size() || Expr[Pos] != '"') {
+      if (ErrorMsg.empty())
+        ErrorMsg = "expected string literal at position " + std::to_string(Pos);
+      return std::nullopt;
+    }
+
+    ++Pos; // Skip opening quote
+    size_t Start = Pos;
+    while (Pos < Expr.size() && Expr[Pos] != '"')
+      ++Pos;
+
+    if (Pos >= Expr.size()) {
+      if (ErrorMsg.empty())
+        ErrorMsg = "unclosed string literal starting at position " +
+                   std::to_string(Start - 1);
+      return std::nullopt;
+    }
+
+    StringRef Result = Expr.slice(Start, Pos);
+    ++Pos; // Skip closing quote
+    return Result;
+  }
+
+  bool parseComparison() {
+    skipWhitespace();
+
+    // Parse left-hand side (property name)
+    size_t Start = Pos;
+    while (Pos < Expr.size() && (std::isalnum(Expr[Pos]) || Expr[Pos] == '_'))
+      ++Pos;
+
+    StringRef PropName = Expr.slice(Start, Pos);
+    if (PropName.empty()) {
+      if (ErrorMsg.empty())
+        ErrorMsg = "expected property name at position " + std::to_string(Pos);
+      return true; // Return true to avoid cascading errors
+    }
+    skipWhitespace();
+
+    // Check for .startswith() method call
+    if (Pos < Expr.size() && Expr[Pos] == '.') {
+      ++Pos;
+      skipWhitespace();
+
+      // Parse method name
+      Start = Pos;
+      while (Pos < Expr.size() && std::isalpha(Expr[Pos]))
+        ++Pos;
+
+      StringRef MethodName = Expr.slice(Start, Pos);
+      skipWhitespace();
+
+      if (MethodName == "startswith") {
+        // Parse (
+        if (Pos >= Expr.size() || Expr[Pos] != '(') {
+          if (ErrorMsg.empty())
+            ErrorMsg = "expected '(' after 'startswith' at position " +
+                       std::to_string(Pos);
+          return true;
+        }
+        ++Pos;
+
+        // Parse string argument
+        auto Prefix = parseStringLiteral();
+        if (!Prefix)
+          return true; // Error already set in parseStringLiteral
+
+        skipWhitespace();
+
+        // Parse )
+        if (Pos >= Expr.size() || Expr[Pos] != ')') {
+          if (ErrorMsg.empty())
+            ErrorMsg = "expected ')' to close 'startswith' call at position " +
+                       std::to_string(Pos);
+          return true;
+        }
+        ++Pos;
+
+        // Evaluate startswith
+        auto StrIt = StringPropertyValues.find(PropName);
+        if (StrIt == StringPropertyValues.end())
+          return true; // Unknown property, assume filter passes
+
+        return StrIt->second.starts_with(*Prefix);
+      }
+
+      if (ErrorMsg.empty())
+        ErrorMsg = "unknown method '" + MethodName.str() + "' on property '" +
+                   PropName.str() + "'";
+      return true;
+    }
+
+    // Check if this is an integer property
+    auto IntIt = IntPropertyValues.find(PropName);
+    if (IntIt != IntPropertyValues.end()) {
+      // Integer comparison
+      int64_t LHS = IntIt->second;
+
+      // Parse operator
+      enum OpKind { EQ, NE, LT, GT, LE, GE } Op;
+      if (Pos < Expr.size()) {
+        if (Expr[Pos] == '=' && Pos + 1 < Expr.size() && Expr[Pos + 1] == '=') {
+          Op = EQ;
+          Pos += 2;
+        } else if (Expr[Pos] == '!' && Pos + 1 < Expr.size() &&
+                   Expr[Pos + 1] == '=') {
+          Op = NE;
+          Pos += 2;
+        } else if (Expr[Pos] == '<' && Pos + 1 < Expr.size() &&
+                   Expr[Pos + 1] == '=') {
+          Op = LE;
+          Pos += 2;
+        } else if (Expr[Pos] == '>' && Pos + 1 < Expr.size() &&
+                   Expr[Pos + 1] == '=') {
+          Op = GE;
+          Pos += 2;
+        } else if (Expr[Pos] == '<') {
+          Op = LT;
+          Pos += 1;
+        } else if (Expr[Pos] == '>') {
+          Op = GT;
+          Pos += 1;
+        } else {
+          if (ErrorMsg.empty())
+            ErrorMsg = "expected comparison operator (==, !=, <, >, <=, >=) at "
+                       "position " +
+                       std::to_string(Pos);
+          return true;
+        }
+      } else {
+        if (ErrorMsg.empty())
+          ErrorMsg = "expected comparison operator after property '" +
+                     PropName.str() + "'";
+        return true;
+      }
+
+      skipWhitespace();
+
+      // Parse right-hand side (constant value)
+      Start = Pos;
+      bool Negative = false;
+      if (Pos < Expr.size() && Expr[Pos] == '-') {
+        Negative = true;
+        ++Pos;
+      }
+
+      size_t DigitStart = Pos;
+      while (Pos < Expr.size() && std::isdigit(Expr[Pos]))
+        ++Pos;
+
+      if (Pos == DigitStart) {
+        if (ErrorMsg.empty())
+          ErrorMsg =
+              "expected integer value at position " + std::to_string(Pos);
+        return true;
+      }
+
+      StringRef ValueStr = Expr.slice(Start, Pos);
+      int64_t RHS = 0;
+      if (ValueStr.getAsInteger(10, RHS)) {
+        if (ErrorMsg.empty())
+          ErrorMsg = "invalid integer value '" + ValueStr.str() + "'";
+        return true;
+      }
+      if (Negative)
+        RHS = -RHS;
+
+      // Evaluate comparison
+      switch (Op) {
+      case EQ:
+        return LHS == RHS;
+      case NE:
+        return LHS != RHS;
+      case LT:
+        return LHS < RHS;
+      case GT:
+        return LHS > RHS;
+      case LE:
+        return LHS <= RHS;
+      case GE:
+        return LHS >= RHS;
+      }
+      return true;
+    }
+
+    // Check if this is a string property
+    auto StrIt = StringPropertyValues.find(PropName);
+    if (StrIt != StringPropertyValues.end()) {
+      // String comparison
+      StringRef LHS = StrIt->second;
+
+      // Parse operator (only == and != for strings)
+      enum OpKind { EQ, NE } Op;
+      if (Pos < Expr.size()) {
+        if (Expr[Pos] == '=' && Pos + 1 < Expr.size() && Expr[Pos + 1] == '=') {
+          Op = EQ;
+          Pos += 2;
+        } else if (Expr[Pos] == '!' && Pos + 1 < Expr.size() &&
+                   Expr[Pos + 1] == '=') {
+          Op = NE;
+          Pos += 2;
+        } else {
+          if (ErrorMsg.empty())
+            ErrorMsg = "string property '" + PropName.str() +
+                       "' only supports == and != operators";
+          return true;
+        }
+      } else {
+        if (ErrorMsg.empty())
+          ErrorMsg = "expected comparison operator after string property '" +
+                     PropName.str() + "'";
+        return true;
+      }
+
+      skipWhitespace();
+
+      // Parse right-hand side (string literal)
+      auto RHS = parseStringLiteral();
+      if (!RHS)
+        return true; // Error already set in parseStringLiteral
+
+      // Evaluate comparison
+      switch (Op) {
+      case EQ:
+        return LHS == *RHS;
+      case NE:
+        return LHS != *RHS;
+      }
+      return true;
+    }
+
+    // Unknown property, assume filter passes
+    if (ErrorMsg.empty())
+      ErrorMsg = "expected property name, got '" + PropName.str() + "'";
+    return true;
+  }
+};
+} // anonymous namespace
+
+bool InstrumentationOpportunity::evaluateFilter(Value &V,
+                                                InstrumentationConfig &IConf,
+                                                InstrumentorIRBuilderTy &IIRB) {
+  if (Filter.empty())
+    return true;
+
+  // Collect constant property values for filter evaluation
+  DenseMap<StringRef, int64_t> IntPropertyValues;
+  DenseMap<StringRef, StringRef> StringPropertyValues;
+
+  for (auto &Arg : IRTArgs) {
+    if (!Arg.Enabled)
+      continue;
+
+    // Get the value for this argument
+    Value *ArgValue = Arg.GetterCB(V, *Arg.Ty, IConf, IIRB);
+    if (!ArgValue)
+      continue;
+
+    // Check for constant integer values
+    if (auto *CI = dyn_cast<ConstantInt>(ArgValue)) {
+      IntPropertyValues[Arg.Name] = CI->getSExtValue();
+    }
+    // Check for constant string values (marked with STRING flag)
+    else if ((Arg.Flags & IRTArg::STRING) && isa<Constant>(ArgValue)) {
+      // Try to extract the string from a global string constant
+      if (auto *GEP = dyn_cast<ConstantExpr>(ArgValue)) {
+        if (GEP->getOpcode() == Instruction::GetElementPtr) {
+          if (auto *GV = dyn_cast<GlobalVariable>(GEP->getOperand(0))) {
+            if (GV->isConstant() && GV->hasInitializer()) {
+              if (auto *CDA =
+                      dyn_cast<ConstantDataArray>(GV->getInitializer())) {
+                if (CDA->isCString()) {
+                  StringPropertyValues[Arg.Name] = CDA->getAsCString();
+                }
+              }
+            }
+          }
+        }
+      }
+      // Handle direct global variable references
+      else if (auto *GV = dyn_cast<GlobalVariable>(ArgValue)) {
+        if (GV->isConstant() && GV->hasInitializer()) {
+          if (auto *CDA = dyn_cast<ConstantDataArray>(GV->getInitializer())) {
+            if (CDA->isCString()) {
+              StringPropertyValues[Arg.Name] = CDA->getAsCString();
+            }
+          }
+        }
+      }
+    }
+    // If the value is not constant, we skip it - the filter will pass
+    // for dynamic values as per the requirement
+  }
+
+  FilterEvaluator Evaluator(Filter, std::move(IntPropertyValues),
+                            std::move(StringPropertyValues));
+  bool Result = Evaluator.evaluate();
+
+  // Emit an error if the filter is malformed
+  if (Evaluator.hasError()) {
+    IIRB.Ctx.diagnose(DiagnosticInfoInstrumentation(
+        Twine("malformed filter expression for instrumentation opportunity '") +
+            getName() + Twine("': ") + Evaluator.getError() +
+            Twine("\nFilter: ") + Filter,
+        DS_Error));
+    return false; // Skip instrumentation on error
+  }
+
+  return Result;
+}
+
 Value *InstrumentationOpportunity::forceCast(Value &V, Type &Ty,
                                              InstrumentorIRBuilderTy &IIRB) {
   if (V.getType()->isVoidTy())

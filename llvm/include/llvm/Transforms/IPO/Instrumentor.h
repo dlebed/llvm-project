@@ -477,6 +477,20 @@ struct InstrumentationOpportunity {
   /// Whether the opportunity is enabled.
   bool Enabled = true;
 
+  /// A filter expression to be matched against runtime property values. If the
+  /// filter is non-empty, only instrumentations matching the filter will be
+  /// executed. The filter syntax supports:
+  /// - Integer comparisons: ==, !=, <, >, <=, >=
+  /// - String comparisons: ==, != (with quoted strings)
+  /// - String prefix check: startswith("prefix")
+  /// - Logical operators: &&, ||
+  /// Examples:
+  ///   "sync_scope_id==3 && atomicity_ordering>0"
+  ///   "name==\"foo\" || name.startswith(\"test_\")"
+  /// If a property value is dynamic (not a constant), the filter is assumed to
+  /// pass (true).
+  StringRef Filter;
+
   /// Helpers to cast values, pass them to the runtime, and replace them. To be
   /// used as part of the getter/setter of a InstrumentationOpportunity.
   ///{
@@ -498,11 +512,21 @@ struct InstrumentationOpportunity {
     if (CB && !CB(*V))
       return nullptr;
 
+    // Check if the filter matches before instrumenting
+    if (!evaluateFilter(*V, IConf, IIRB))
+      return nullptr;
+
     const DataLayout &DL = IIRB.IRB.GetInsertBlock()->getDataLayout();
     IRTCallDescription IRTCallDesc(*this, getRetTy(V->getContext()));
     auto *CI = IRTCallDesc.createLLVMCall(V, IConf, IIRB, DL, ICaches);
     return CI;
   }
+
+  /// Evaluate the filter expression against the current instrumentation
+  /// opportunity. Returns true if the filter passes (or is empty), false
+  /// otherwise. Dynamic values (non-constants) are assumed to pass.
+  bool evaluateFilter(Value &V, InstrumentationConfig &IConf,
+                      InstrumentorIRBuilderTy &IIRB);
 
   /// Get the return type for the instrumentation runtime function.
   virtual Type *getRetTy(LLVMContext &Ctx) const { return nullptr; }
