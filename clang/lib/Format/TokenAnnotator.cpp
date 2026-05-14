@@ -4569,10 +4569,12 @@ void TokenAnnotator::markManuallyAlignedBracedLists(AnnotatedLine &Line) const {
     if (!HasAnyWideGap)
       continue;
 
-    unsigned Candidates = 0;
-    unsigned Aligned = 0;
+    // Build the inferred grid: for each gap position, the majority column
+    // among rows that have a token at that position (only if a strict
+    // majority exists). Positions without a strict majority are left
+    // undefined and ignored when scoring rows.
+    SmallVector<int, 4> GridColumn(MaxLen, -1);
     for (size_t I = 0; I < MaxLen; ++I) {
-      // Collect column counts for rows that have a token at I.
       llvm::DenseMap<unsigned, unsigned> ColCounts;
       unsigned Participants = 0;
       for (auto &R : Rows) {
@@ -4584,21 +4586,39 @@ void TokenAnnotator::markManuallyAlignedBracedLists(AnnotatedLine &Line) const {
       }
       if (Participants < 2)
         continue;
-      ++Candidates;
-      // Find majority column among participants.
-      unsigned MajorityCount = 0;
-      for (auto &E : ColCounts)
-        MajorityCount = std::max(MajorityCount, E.second);
-      // A position is "aligned" if a majority of rows share its column.
-      // The wide-gap signal is checked once at list level above.
-      if (MajorityCount * 2 > Participants)
-        ++Aligned;
+      unsigned BestCount = 0;
+      unsigned BestStart = 0;
+      for (auto &E : ColCounts) {
+        if (E.second > BestCount) {
+          BestCount = E.second;
+          BestStart = E.first;
+        }
+      }
+      // Require a strict majority of participating rows.
+      if (BestCount * 2 > Participants)
+        GridColumn[I] = static_cast<int>(BestStart);
     }
 
-    if (Candidates == 0)
-      continue;
-    // Pass if fraction of aligned positions >= Threshold / 100.
-    if (Aligned * 100 < Candidates * Threshold)
+    // Score each row: a row is "aligned" if a strict majority of its
+    // defined positions (positions where the grid is defined AND the row
+    // has an element) agree with the grid column.
+    unsigned AlignedRows = 0;
+    for (auto &R : Rows) {
+      unsigned Defined = 0;
+      unsigned Agree = 0;
+      for (size_t I = 0; I < R.size(); ++I) {
+        if (GridColumn[I] < 0)
+          continue;
+        ++Defined;
+        if (static_cast<int>(R[I]->OriginalColumn) == GridColumn[I])
+          ++Agree;
+      }
+      if (Defined > 0 && Agree * 2 > Defined)
+        ++AlignedRows;
+    }
+
+    // Pass if fraction of aligned rows >= Threshold / 100.
+    if (AlignedRows * 100 < Rows.size() * Threshold)
       continue;
 
     // Heuristic passed: mark the opening brace and force breaks at row starts.
