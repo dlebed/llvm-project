@@ -25678,6 +25678,192 @@ TEST_F(FormatTest, AlignUTFCommentsAndStringLiterals) {
                Style);
 }
 
+TEST_F(FormatTest, PreserveManualBracedListAlignment) {
+  auto Style = getLLVMStyle();
+  Style.PreserveManualBracedListAlignment.Enabled = true;
+  ASSERT_EQ(66u, Style.PreserveManualBracedListAlignment.AlignedRowPercent);
+  ASSERT_EQ(true, Style.PreserveManualBracedListAlignment.NormalizeRaggedRows);
+
+  // T1: 1-D array of scalars, all rows aligned.
+  verifyNoChange("int a[] = {\n"
+                 "    1,   2,   3,\n"
+                 "    10,  20,  30,\n"
+                 "    100, 200, 300,\n"
+                 "};",
+                 Style);
+
+  // T2: array of structs, user-aligned.
+  verifyNoChange("struct test demo[] = {\n"
+                 "    {56, 23,    \"hello\"},\n"
+                 "    {-1, 93463, \"world\"},\n"
+                 "    {7,  5,     \"!!\"   },\n"
+                 "};",
+                 Style);
+
+  // T3: 2-D matrix.
+  verifyNoChange("double m[3][3] = {\n"
+                 "    { 1.0,  0.0,  0.0},\n"
+                 "    { 0.0,  1.0,  0.0},\n"
+                 "    { 0.0,  0.0,  1.0},\n"
+                 "};",
+                 Style);
+
+  // T4 is intentionally omitted: designated initializers (.field = value)
+  // are handled by AlignConsecutiveAssignments, not this option.
+
+  // T5: aligned values + aligned trailing comments.
+  verifyNoChange("int a[] = {\n"
+                 "    1,   2,   3,   // first\n"
+                 "    10,  20,  30,  // second\n"
+                 "    100, 200, 300, // third\n"
+                 "};",
+                 Style);
+
+  // T6a: ragged row fixable by whitespace only -> NORMALIZE (default).
+  verifyFormat("int a[] = {\n"
+               "    1,   2,   3,\n"
+               "    10,  20,  30,\n"
+               "    100, 200, 300,\n"
+               "    4,   5,   6,\n"
+               "};",
+               "int a[] = {\n"
+               "    1,   2,   3,\n"
+               "    10,  20,  30,\n"
+               "    100, 200, 300,\n"
+               "    4, 5, 6,\n"
+               "};",
+               Style);
+
+  // T6b: ragged row caused by an over-wide token -> LEAVE AS-IS.
+  verifyNoChange("int a[] = {\n"
+                 "    1,   2,   3,\n"
+                 "    10,  20,  30,\n"
+                 "    100, 200, 300,\n"
+                 "    1000000, 2, 3,\n"
+                 "};",
+                 Style);
+
+  // T6c: NormalizeRaggedRows disabled -> ragged row stays ragged.
+  auto NoNormalize = Style;
+  NoNormalize.PreserveManualBracedListAlignment.NormalizeRaggedRows = false;
+  verifyNoChange("int a[] = {\n"
+                 "    1,   2,   3,\n"
+                 "    10,  20,  30,\n"
+                 "    100, 200, 300,\n"
+                 "    4, 5, 6,\n"
+                 "};",
+                 NoNormalize);
+
+  // T13: preprocessor directive inside the list does NOT split the group.
+  verifyNoChange("int a[] = {\n"
+                 "    1,   2,   3,\n"
+                 "#ifdef FOO\n"
+                 "    10,  20,  30,\n"
+                 "#endif\n"
+                 "    100, 200, 300,\n"
+                 "};",
+                 Style);
+
+  // T7: single row -> nothing to align across; extra spaces collapse.
+  verifyFormat("int a[] = {1, 2, 3};",
+               "int a[] = {1,   2,   3};",
+               Style);
+
+  // T8: extra spaces but commas don't line up across rows. With the
+  // list-level wide-gap guard satisfied, manual alignment detection still
+  // fires and the original wide gaps are preserved verbatim.
+  verifyFormat("int a[] = {\n"
+               "    1,    2,   3,\n"
+               "    10,   200,  30,\n"
+               "    100,  2,    3000,\n"
+               "};",
+               "int a[] = {\n"
+               "    1,    2,   3,\n"
+               "    10,   200,  30,\n"
+               "    100,  2,    3000,\n"
+               "};",
+               Style);
+
+  // T9: only single-space gaps; nothing to preserve. With no wide gap
+  // anywhere in the list, IsManuallyAligned is not set and the list
+  // collapses onto a single line under the default 80-column / bin-packing
+  // behavior.
+  verifyFormat("int a[] = {\n"
+               "    1, 2, 3, 10, 20, 30,\n"
+               "};",
+               "int a[] = {\n"
+               "    1, 2, 3,\n"
+               "    10, 20, 30,\n"
+               "};",
+               Style);
+
+  // T10: 2 rows aligned (heuristic passes), but trailing comma + BinPack
+  // makes the line packer produce one element per line.
+  verifyFormat("int a[] = {\n"
+               "    1,\n"
+               "    22,\n"
+               "    333,\n"
+               "    4,\n"
+               "};",
+               "int a[] = {\n"
+               "    1,   22,\n"
+               "    333, 4,\n"
+               "};",
+               Style);
+
+  // T-thr-A: 3 of 5 rows have wide gaps. Preservation fires for those rows;
+  // the other two rows (single-space input) are preserved as-is. Task 9
+  // ragged-row normalization would tidy them, but that is a separate pass.
+  verifyFormat("int a[] = {\n"
+               "    1,   2,   3,\n"
+               "    10,  20,  30,\n"
+               "    100, 200, 300,\n"
+               "    7, 8, 9,\n"
+               "    11, 12, 13,\n"
+               "};",
+               "int a[] = {\n"
+               "    1,   2,   3,\n"
+               "    10,  20,  30,\n"
+               "    100, 200, 300,\n"
+               "    7, 8, 9,\n"
+               "    11, 12, 13,\n"
+               "};",
+               Style);
+
+  // T-thr-B: drop threshold to 50% -> 3/5 passes; ragged rows are
+  // whitespace-fixable so NormalizeRaggedRows fixes them.
+  auto Loose = Style;
+  Loose.PreserveManualBracedListAlignment.AlignedRowPercent = 50;
+  verifyFormat("int a[] = {\n"
+               "    1,   2,   3,\n"
+               "    10,  20,  30,\n"
+               "    100, 200, 300,\n"
+               "    7,   8,   9,\n"
+               "    11,  12,  13,\n"
+               "};",
+               "int a[] = {\n"
+               "    1,   2,   3,\n"
+               "    10,  20,  30,\n"
+               "    100, 200, 300,\n"
+               "    7, 8, 9,\n"
+               "    11, 12, 13,\n"
+               "};",
+               Loose);
+
+  // T11: AlignArrayOfStructures=Left + manual alignment present. The user
+  // chose a layout AIAS_Left would not produce -- note the extra leading
+  // space on the third row's first cell ({ 7, ...}) which AIAS would strip.
+  // The feature must preserve that exact spacing.
+  auto WithAIAS = Style;
+  WithAIAS.AlignArrayOfStructures = FormatStyle::AIAS_Left;
+  verifyNoChange("struct test demo[] = {\n"
+                 "    {56, 23,    \"hello\"},\n"
+                 "    {-1, 93463, \"world\"},\n"
+                 "    { 7, 5,     \"!!\"   },\n"
+                 "};",
+                 WithAIAS);
+}
+
 TEST_F(FormatTest, SpaceBetweenKeywordAndLiteral) {
   verifyFormat("return .5;");
   verifyFormat("return not '5';");
