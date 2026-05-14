@@ -4509,8 +4509,7 @@ struct FormatStyle {
     bool NormalizeRaggedRows;
 
     bool operator==(const PreserveManualBracedListAlignmentStyle &R) const {
-      return Enabled == R.Enabled &&
-             AlignedRowPercent == R.AlignedRowPercent &&
+      return Enabled == R.Enabled && AlignedRowPercent == R.AlignedRowPercent &&
              NormalizeRaggedRows == R.NormalizeRaggedRows;
     }
     bool operator!=(const PreserveManualBracedListAlignmentStyle &R) const {

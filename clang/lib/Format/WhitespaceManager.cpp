@@ -1357,13 +1357,14 @@ void WhitespaceManager::normalizeRaggedRows(unsigned Start, unsigned End) {
       ExpectCellAfterComma = false;
     }
     RunCol = StartCol + Tok->ColumnWidth;
-    if (Tok->is(tok::comma))
+    if (Tok->is(tok::comma)) {
       ExpectCellAfterComma = true;
-    else if (!IsCommentTok(Tok))
+    } else if (!IsCommentTok(Tok)) {
       ExpectCellAfterComma = false; // A non-comma, non-comment token ends
                                     // the "after comma" state -- only the
                                     // immediately following token is the
                                     // cell.
+    }
   }
 
   if (Rows.size() < 2)
@@ -1436,8 +1437,8 @@ void WhitespaceManager::normalizeRaggedRows(unsigned Start, unsigned End) {
 
     // Walk the row from its first cell onwards, maintaining a running
     // display column, adjusting Spaces on each cell as needed.
-    unsigned RunningCol = R.Cells[0].Column +
-                          Changes[R.Cells[0].ChangeIndex].Tok->ColumnWidth;
+    unsigned RunningCol =
+        R.Cells[0].Column + Changes[R.Cells[0].ChangeIndex].Tok->ColumnWidth;
     // Walk Changes between cells too, since they shift the running col.
     unsigned LastChangeIdx = R.Cells[0].ChangeIndex;
     for (unsigned J = 1; J < R.Cells.size(); ++J) {
