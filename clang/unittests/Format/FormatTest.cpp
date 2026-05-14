@@ -25797,7 +25797,8 @@ TEST_F(FormatTest, PreserveManualBracedListAlignment) {
                "};",
                Style);
 
-  // T10: 2 rows, only 1 of 2 gap positions aligns -> below 66%.
+  // T10: 2 rows aligned (heuristic passes), but trailing comma + BinPack
+  // makes the line packer produce one element per line.
   verifyFormat("int a[] = {\n"
                "    1,\n"
                "    22,\n"
