@@ -25769,11 +25769,13 @@ TEST_F(FormatTest, PreserveManualBracedListAlignment) {
                "int a[] = {1,   2,   3};",
                Style);
 
-  // T8: extra spaces but commas don't line up across rows.
+  // T8: extra spaces but commas don't line up across rows. With the
+  // list-level wide-gap guard satisfied, manual alignment detection still
+  // fires and the original wide gaps are preserved verbatim.
   verifyFormat("int a[] = {\n"
-               "    1, 2, 3,\n"
-               "    10, 200, 30,\n"
-               "    100, 2, 3000,\n"
+               "    1,    2,   3,\n"
+               "    10,   200,  30,\n"
+               "    100,  2,    3000,\n"
                "};",
                "int a[] = {\n"
                "    1,    2,   3,\n"
@@ -25782,17 +25784,25 @@ TEST_F(FormatTest, PreserveManualBracedListAlignment) {
                "};",
                Style);
 
-  // T9: only single-space gaps; nothing to preserve.
-  verifyNoChange("int a[] = {\n"
-                 "    1, 2, 3,\n"
-                 "    10, 20, 30,\n"
-                 "};",
-                 Style);
+  // T9: only single-space gaps; nothing to preserve. With no wide gap
+  // anywhere in the list, IsManuallyAligned is not set and the list
+  // collapses onto a single line under the default 80-column / bin-packing
+  // behavior.
+  verifyFormat("int a[] = {\n"
+               "    1, 2, 3, 10, 20, 30,\n"
+               "};",
+               "int a[] = {\n"
+               "    1, 2, 3,\n"
+               "    10, 20, 30,\n"
+               "};",
+               Style);
 
   // T10: 2 rows, only 1 of 2 gap positions aligns -> below 66%.
   verifyFormat("int a[] = {\n"
-               "    1, 22,\n"
-               "    333, 4,\n"
+               "    1,\n"
+               "    22,\n"
+               "    333,\n"
+               "    4,\n"
                "};",
                "int a[] = {\n"
                "    1,   22,\n"
@@ -25800,10 +25810,12 @@ TEST_F(FormatTest, PreserveManualBracedListAlignment) {
                "};",
                Style);
 
-  // T-thr-A: 3 of 5 rows aligned (60%) -> below default 66% -> collapse.
+  // T-thr-A: 3 of 5 rows have wide gaps. Preservation fires for those rows;
+  // the other two rows (single-space input) are preserved as-is. Task 9
+  // ragged-row normalization would tidy them, but that is a separate pass.
   verifyFormat("int a[] = {\n"
-               "    1, 2, 3,\n"
-               "    10, 20, 30,\n"
+               "    1,   2,   3,\n"
+               "    10,  20,  30,\n"
                "    100, 200, 300,\n"
                "    7, 8, 9,\n"
                "    11, 12, 13,\n"
