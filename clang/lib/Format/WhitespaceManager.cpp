@@ -1292,9 +1292,189 @@ void WhitespaceManager::applyOriginalWhitespace(unsigned Start, unsigned End) {
 }
 
 void WhitespaceManager::normalizeRaggedRows(unsigned Start, unsigned End) {
-  (void)Start;
-  (void)End;
-  // Task 9.
+  if (Start + 1 >= End)
+    return;
+
+  // A "cell" is the first non-comment token of a row, or the first
+  // non-comment token following a comma on the same row. For each row we
+  // collect the display column where each cell starts. We then derive a
+  // per-position "grid" column from the majority vote across rows and
+  // push cells that land short of the grid onto it (whitespace-only).
+  struct Cell {
+    unsigned ChangeIndex;
+    unsigned Column; // Display column where the cell's token starts.
+  };
+  struct Row {
+    llvm::SmallVector<Cell, 8> Cells;
+  };
+
+  const FormatToken *Open = Changes[Start].Tok;
+  const FormatToken *Close = Open->MatchingParen;
+
+  llvm::SmallVector<Row, 16> Rows;
+  // Walk Changes after the opening brace. The first row begins at the
+  // first Change with NewlinesBefore > 0.
+  bool InRow = false;
+  // Running display column on the current row.
+  unsigned RunCol = 0;
+  // True iff the previous in-row Change is a comma (so the next
+  // non-comment in-row token is a new cell).
+  bool ExpectCellAfterComma = false;
+
+  auto IsCommentTok = [](const FormatToken *T) {
+    return T && T->is(tok::comment);
+  };
+
+  for (unsigned I = Start + 1; I < End; ++I) {
+    Change &C = Changes[I];
+    const FormatToken *Tok = C.Tok;
+
+    if (C.NewlinesBefore > 0) {
+      // Start a new row. Skip rows whose first token is the closing brace
+      // or a preprocessor directive -- they're not data rows.
+      if (Tok == Close)
+        break;
+      // Spaces for a Change after a newline is the row indentation.
+      RunCol = static_cast<unsigned>(std::max(0, C.Spaces));
+      InRow = true;
+      ExpectCellAfterComma = false;
+      Rows.emplace_back();
+      // The first non-comment token of the row counts as cell 0.
+      if (!IsCommentTok(Tok))
+        Rows.back().Cells.push_back({I, RunCol});
+      RunCol += Tok->ColumnWidth;
+      if (Tok->is(tok::comma))
+        ExpectCellAfterComma = true;
+      continue;
+    }
+
+    if (!InRow)
+      continue; // Haven't seen a newline yet (e.g. tokens on the `{` line).
+
+    // Same-row Change.
+    unsigned Spaces = static_cast<unsigned>(std::max(0, C.Spaces));
+    unsigned StartCol = RunCol + Spaces;
+    if (!IsCommentTok(Tok) && ExpectCellAfterComma) {
+      Rows.back().Cells.push_back({I, StartCol});
+      ExpectCellAfterComma = false;
+    }
+    RunCol = StartCol + Tok->ColumnWidth;
+    if (Tok->is(tok::comma))
+      ExpectCellAfterComma = true;
+    else if (!IsCommentTok(Tok))
+      ExpectCellAfterComma = false; // A non-comma, non-comment token ends
+                                    // the "after comma" state -- only the
+                                    // immediately following token is the
+                                    // cell.
+  }
+
+  if (Rows.size() < 2)
+    return;
+
+  // Build the grid: for each cell index, the majority column across rows.
+  unsigned MaxCells = 0;
+  for (const auto &R : Rows)
+    MaxCells = std::max<unsigned>(MaxCells, R.Cells.size());
+
+  llvm::SmallVector<std::optional<unsigned>, 8> Grid(MaxCells);
+  for (unsigned J = 0; J < MaxCells; ++J) {
+    // Tally columns observed at position J.
+    llvm::SmallVector<std::pair<unsigned, unsigned>, 4> Tally;
+    unsigned Total = 0;
+    for (const auto &R : Rows) {
+      if (R.Cells.size() <= J)
+        continue;
+      unsigned Col = R.Cells[J].Column;
+      ++Total;
+      bool Found = false;
+      for (auto &P : Tally) {
+        if (P.first == Col) {
+          ++P.second;
+          Found = true;
+          break;
+        }
+      }
+      if (!Found)
+        Tally.push_back({Col, 1});
+    }
+    if (Total == 0)
+      continue;
+    // Strict majority: count > Total/2.
+    for (const auto &P : Tally) {
+      if (P.second * 2 > Total) {
+        Grid[J] = P.first;
+        break;
+      }
+    }
+  }
+
+  // Grid for cell 0 must exist; otherwise we have no anchor.
+  if (!Grid.empty() && !Grid[0].has_value())
+    return;
+
+  // Second pass: for each row, if its first cell lands on the grid,
+  // re-walk the row updating Spaces to push later cells onto the grid
+  // when they currently land short.
+  for (auto &R : Rows) {
+    if (R.Cells.empty())
+      continue;
+    if (!Grid[0].has_value() || R.Cells[0].Column != *Grid[0])
+      continue; // Row's anchor doesn't match -- leave alone.
+
+    // Decide whether any cell in this row can be normalized AND whether
+    // any cell overshoots the grid. If a cell overshoots, the row has an
+    // over-wide token; leave the row untouched (T6b).
+    bool Overshoots = false;
+    for (unsigned J = 1; J < R.Cells.size(); ++J) {
+      if (J >= Grid.size() || !Grid[J].has_value())
+        continue;
+      if (R.Cells[J].Column > *Grid[J]) {
+        Overshoots = true;
+        break;
+      }
+    }
+    if (Overshoots)
+      continue;
+
+    // Walk the row from its first cell onwards, maintaining a running
+    // display column, adjusting Spaces on each cell as needed.
+    unsigned RunningCol = R.Cells[0].Column +
+                          Changes[R.Cells[0].ChangeIndex].Tok->ColumnWidth;
+    // Walk Changes between cells too, since they shift the running col.
+    unsigned LastChangeIdx = R.Cells[0].ChangeIndex;
+    for (unsigned J = 1; J < R.Cells.size(); ++J) {
+      Cell &Cur = R.Cells[J];
+      // Advance running column through intervening Changes (the comma and
+      // any other tokens on the same row between the previous cell and
+      // this cell).
+      for (unsigned K = LastChangeIdx + 1; K < Cur.ChangeIndex; ++K) {
+        Change &Mid = Changes[K];
+        if (Mid.NewlinesBefore > 0)
+          break; // Shouldn't happen given cell construction, but be safe.
+        unsigned Sp = static_cast<unsigned>(std::max(0, Mid.Spaces));
+        RunningCol += Sp + Mid.Tok->ColumnWidth;
+      }
+      // Now RunningCol == column right after the token preceding Cur.
+      Change &CurChange = Changes[Cur.ChangeIndex];
+      unsigned OrigSpaces =
+          static_cast<unsigned>(std::max(0, CurChange.Spaces));
+      unsigned CurCol = RunningCol + OrigSpaces;
+      unsigned TargetCol = CurCol;
+      // Only normalize a cell when the user clearly didn't try to align
+      // it: the original gap before the cell is the minimum (1 space).
+      // This prevents disturbing cells where the user picked a custom
+      // width different from the inferred grid (e.g. T8).
+      if (J < Grid.size() && Grid[J].has_value() && CurCol < *Grid[J] &&
+          OrigSpaces == 1) {
+        TargetCol = *Grid[J];
+      }
+      unsigned NewSpaces = TargetCol - RunningCol;
+      if (NewSpaces != OrigSpaces)
+        CurChange.Spaces = static_cast<int>(NewSpaces);
+      RunningCol = TargetCol + CurChange.Tok->ColumnWidth;
+      LastChangeIdx = Cur.ChangeIndex;
+    }
+  }
 }
 
 void WhitespaceManager::alignArrayInitializers() {
