@@ -255,6 +255,9 @@ TEST(ConfigParseTest, ParsesConfigurationBools) {
   CHECK_PARSE_NESTED_BOOL(KeepEmptyLines, AtEndOfFile);
   CHECK_PARSE_NESTED_BOOL(KeepEmptyLines, AtStartOfBlock);
   CHECK_PARSE_NESTED_BOOL(KeepEmptyLines, AtStartOfFile);
+  CHECK_PARSE_NESTED_BOOL(PreserveManualBracedListAlignment, Enabled);
+  CHECK_PARSE_NESTED_BOOL(PreserveManualBracedListAlignment,
+                          NormalizeRaggedRows);
   CHECK_PARSE_NESTED_BOOL(SpaceBeforeParensOptions, AfterControlStatements);
   CHECK_PARSE_NESTED_BOOL(SpaceBeforeParensOptions, AfterForeachMacros);
   CHECK_PARSE_NESTED_BOOL(SpaceBeforeParensOptions,
@@ -1335,6 +1338,35 @@ TEST(ConfigParseTest, ParsesConfiguration) {
                            DecimalMinDigitsInsert, 5);
   CHECK_PARSE_NESTED_VALUE("HexMinDigits: 5", IntegerLiteralSeparator,
                            HexMinDigitsInsert, 5);
+}
+
+TEST(ConfigParseTest, ParsesPreserveManualBracedListAlignment) {
+  FormatStyle Style = {};
+  Style.Language = FormatStyle::LK_Cpp;
+  Style.PreserveManualBracedListAlignment.Enabled = false;
+  Style.PreserveManualBracedListAlignment.AlignedRowPercent = 66u;
+  Style.PreserveManualBracedListAlignment.NormalizeRaggedRows = true;
+
+  CHECK_PARSE("PreserveManualBracedListAlignment:\n"
+              "  Enabled: true\n"
+              "  AlignedRowPercent: 75\n"
+              "  NormalizeRaggedRows: false\n",
+              PreserveManualBracedListAlignment,
+              FormatStyle::PreserveManualBracedListAlignmentStyle(
+                  {/*Enabled=*/true, /*AlignedRowPercent=*/75u,
+                   /*NormalizeRaggedRows=*/false}));
+
+  // Partial YAML: setting Enabled only must leave the other fields at
+  // whatever value they had.
+  Style.PreserveManualBracedListAlignment = {/*Enabled=*/false,
+                                             /*AlignedRowPercent=*/66u,
+                                             /*NormalizeRaggedRows=*/true};
+  CHECK_PARSE("PreserveManualBracedListAlignment:\n"
+              "  Enabled: true\n",
+              PreserveManualBracedListAlignment,
+              FormatStyle::PreserveManualBracedListAlignmentStyle(
+                  {/*Enabled=*/true, /*AlignedRowPercent=*/66u,
+                   /*NormalizeRaggedRows=*/true}));
 }
 
 TEST(ConfigParseTest, ParsesConfigurationWithLanguages) {

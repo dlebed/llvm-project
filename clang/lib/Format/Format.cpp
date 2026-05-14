@@ -1066,6 +1066,16 @@ struct ScalarEnumerationTraits<
   }
 };
 
+template <>
+struct MappingTraits<FormatStyle::PreserveManualBracedListAlignmentStyle> {
+  static void
+  mapping(IO &IO, FormatStyle::PreserveManualBracedListAlignmentStyle &Value) {
+    IO.mapOptional("Enabled", Value.Enabled);
+    IO.mapOptional("AlignedRowPercent", Value.AlignedRowPercent);
+    IO.mapOptional("NormalizeRaggedRows", Value.NormalizeRaggedRows);
+  }
+};
+
 template <> struct MappingTraits<FormatStyle> {
   static void mapping(IO &IO, FormatStyle &Style) {
     // When reading, read the language first, we need it for getPredefinedStyle.
@@ -1440,6 +1450,8 @@ template <> struct MappingTraits<FormatStyle> {
                    Style.PenaltyReturnTypeOnItsOwnLine);
     IO.mapOptional("PointerAlignment", Style.PointerAlignment);
     IO.mapOptional("PPIndentWidth", Style.PPIndentWidth);
+    IO.mapOptional("PreserveManualBracedListAlignment",
+                   Style.PreserveManualBracedListAlignment);
     IO.mapOptional("QualifierAlignment", Style.QualifierAlignment);
     // Default Order for Left/Right based Qualifier alignment.
     if (Style.QualifierAlignment == FormatStyle::QAS_Right)
@@ -1981,6 +1993,9 @@ FormatStyle getLLVMStyle(FormatStyle::LanguageKind Language) {
                               /*BreakAfter=*/0};
   LLVMStyle.PointerAlignment = FormatStyle::PAS_Right;
   LLVMStyle.PPIndentWidth = -1;
+  LLVMStyle.PreserveManualBracedListAlignment = {/*Enabled=*/false,
+                                                 /*AlignedRowPercent=*/66u,
+                                                 /*NormalizeRaggedRows=*/true};
   LLVMStyle.QualifierAlignment = FormatStyle::QAS_Leave;
   LLVMStyle.ReferenceAlignment = FormatStyle::RAS_Pointer;
   LLVMStyle.ReflowComments = FormatStyle::RCS_Always;
