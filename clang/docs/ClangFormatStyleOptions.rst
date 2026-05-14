@@ -6201,6 +6201,44 @@ the configuration (without a prefix: ``Auto``).
 
 
 
+.. _PreserveManualBracedListAlignment:
+
+**PreserveManualBracedListAlignment** (``PreserveManualBracedListAlignmentStyle``) :versionbadge:`clang-format 23` :ref:`¶ <PreserveManualBracedListAlignment>`
+  Preserve manually aligned columns inside positional braced-list
+  initializers (arrays and structs).
+
+  Detects multi-row layouts where the user has lined up commas or
+  values vertically with more than one space. When the heuristic
+  passes, the column layout is preserved and (by default) ragged
+  rows whose only deviation is whitespace are normalized to the
+  inferred grid.
+
+
+  .. code-block:: c++
+
+    // Preserved when Enabled is true (and heuristic passes):
+    int a[] = {
+        1,   2,   3,
+        10,  20,  30,
+        100, 200, 300,
+    };
+
+  Nested configuration flags:
+
+  Style of preserving the user's manual column alignment inside
+  positional braced-list initializers.
+
+  * ``bool Enabled`` Whether manual-alignment preservation is enabled.
+
+  * ``unsigned AlignedRowPercent`` Percentage (0..100) of inter-row gap positions that must line up
+    (with more than one space) for a braced list to be considered
+    manually aligned and preserved.
+
+  * ``bool NormalizeRaggedRows`` When the heuristic passes, normalize rows whose only deviation
+    from the inferred grid is whitespace. Rows containing a token
+    wider than the inferred column are always left as-is.
+
+
 .. _QualifierAlignment:
 
 **QualifierAlignment** (``QualifierAlignmentStyle``) :versionbadge:`clang-format 14` :ref:`¶ <QualifierAlignment>`
