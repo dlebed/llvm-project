@@ -276,6 +276,12 @@ private:
   /// the specified \p Column.
   void alignEscapedNewlines(unsigned Start, unsigned End, unsigned Column);
 
+  /// Detect and preserve manually aligned columns inside positional
+  /// braced-list initializers. Runs before alignTrailingComments and
+  /// alignArrayInitializers; on success it sets IsPreserved on the
+  /// affected Changes so later passes skip them.
+  void preserveManualBracedListAlignment();
+
   /// Align Array Initializers over all \c Changes.
   void alignArrayInitializers();
 

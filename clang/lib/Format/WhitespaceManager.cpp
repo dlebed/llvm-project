@@ -139,6 +139,7 @@ const tooling::Replacements &WhitespaceManager::generateReplacements() {
     alignConsecutiveTableGenDefinitions();
   }
   alignChainedConditionals();
+  preserveManualBracedListAlignment();
   alignTrailingComments();
   alignEscapedNewlines();
   alignArrayInitializers();
@@ -1218,6 +1219,12 @@ void WhitespaceManager::alignEscapedNewlines(unsigned Start, unsigned End,
         C.EscapedNewlineColumn = Column;
     }
   }
+}
+
+void WhitespaceManager::preserveManualBracedListAlignment() {
+  if (!Style.PreserveManualBracedListAlignment.Enabled)
+    return;
+  // Detection/preservation lands in Task 7+.
 }
 
 void WhitespaceManager::alignArrayInitializers() {
