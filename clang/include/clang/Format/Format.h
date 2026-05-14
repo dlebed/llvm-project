@@ -4494,6 +4494,21 @@ struct FormatStyle {
   /// \version 3.7
   PointerAlignmentStyle PointerAlignment;
 
+  /// The number of columns to use for indentation of preprocessor statements.
+  /// When set to -1 (default) ``IndentWidth`` is used also for preprocessor
+  /// statements.
+  /// \code
+  ///    PPIndentWidth: 1
+  ///
+  ///    #ifdef __linux__
+  ///    # define FOO
+  ///    #else
+  ///    # define BAR
+  ///    #endif
+  /// \endcode
+  /// \version 13
+  int PPIndentWidth;
+
   /// Style of preserving the user's manual column alignment inside
   /// positional braced-list initializers.
   struct PreserveManualBracedListAlignmentStyle {
@@ -4521,21 +4536,6 @@ struct FormatStyle {
   /// initializers (arrays and structs).
   /// \version 23
   PreserveManualBracedListAlignmentStyle PreserveManualBracedListAlignment;
-
-  /// The number of columns to use for indentation of preprocessor statements.
-  /// When set to -1 (default) ``IndentWidth`` is used also for preprocessor
-  /// statements.
-  /// \code
-  ///    PPIndentWidth: 1
-  ///
-  ///    #ifdef __linux__
-  ///    # define FOO
-  ///    #else
-  ///    # define BAR
-  ///    #endif
-  /// \endcode
-  /// \version 13
-  int PPIndentWidth;
 
   /// Different specifiers and qualifiers alignment styles.
   enum QualifierAlignmentStyle : int8_t {
