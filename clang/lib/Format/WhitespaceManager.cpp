@@ -1019,6 +1019,8 @@ void WhitespaceManager::alignTrailingComments() {
     auto &C = Changes[I];
     if (C.StartOfBlockComment)
       continue;
+    if (C.IsPreserved)
+      continue;
     if (C.NewlinesBefore != 0) {
       Newlines += C.NewlinesBefore;
       const bool WasInPP = std::exchange(
@@ -1242,7 +1244,8 @@ void WhitespaceManager::alignArrayInitializers() {
         if (Tok->is(tok::pp_define))
           break;
         if (Tok == C.Tok->MatchingParen) {
-          alignArrayInitializers(ChangeIndex, InsideIndex + 1);
+          if (!C.IsPreserved)
+            alignArrayInitializers(ChangeIndex, InsideIndex + 1);
           ChangeIndex = InsideIndex + 1;
           FoundComplete = true;
           break;
