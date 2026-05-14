@@ -1165,6 +1165,8 @@ void WhitespaceManager::alignTrailingComments() {
 void WhitespaceManager::alignTrailingComments(unsigned Start, unsigned End,
                                               unsigned Column) {
   for (unsigned i = Start; i != End; ++i) {
+    if (Changes[i].IsPreserved)
+      continue;
     int Shift = 0;
     if (Changes[i].IsTrailingComment)
       Shift = Column - Changes[i].StartOfTokenColumn;
