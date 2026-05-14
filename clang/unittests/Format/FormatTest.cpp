@@ -25811,15 +25811,11 @@ TEST_F(FormatTest, PreserveManualBracedListAlignment) {
                "};",
                Style);
 
-  // T-thr-A: 3 of 5 rows have wide gaps. Preservation fires for those rows;
-  // the other two rows (single-space input) are preserved as-is. Task 9
-  // ragged-row normalization would tidy them, but that is a separate pass.
+  // T-thr-A: 3 of 5 rows aligned (60%) -> below default 66% -> collapse.
+  // The per-row heuristic rejects this list, so clang-format falls back to
+  // its default behavior (collapse to as few lines as fit the column limit).
   verifyFormat("int a[] = {\n"
-               "    1,   2,   3,\n"
-               "    10,  20,  30,\n"
-               "    100, 200, 300,\n"
-               "    7, 8, 9,\n"
-               "    11, 12, 13,\n"
+               "    1, 2, 3, 10, 20, 30, 100, 200, 300, 7, 8, 9, 11, 12, 13,\n"
                "};",
                "int a[] = {\n"
                "    1,   2,   3,\n"

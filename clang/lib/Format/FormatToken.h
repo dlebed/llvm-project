@@ -608,6 +608,11 @@ public:
   /// This starts an array initializer.
   bool IsArrayInitializer = false;
 
+  /// \c true if this is the opening brace of a braced-list initializer
+  /// whose manual column alignment we should preserve. Set by
+  /// markManuallyAlignedBracedLists; consumed by WhitespaceManager.
+  bool IsManuallyAligned = false;
+
   /// Is optional and can be removed.
   bool Optional = false;
 

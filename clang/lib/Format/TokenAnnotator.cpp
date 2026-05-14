@@ -4142,6 +4142,9 @@ void TokenAnnotator::calculateFormattingInformation(AnnotatedLine &Line) const {
   if (AlignArrayOfStructures)
     calculateArrayInitializerColumnList(Line);
 
+  if (Style.PreserveManualBracedListAlignment.Enabled)
+    markManuallyAlignedBracedLists(Line);
+
   const auto *FirstNonComment = Line.getFirstNonComment();
   bool SeenName = false;
   bool LineIsFunctionDeclaration = false;
@@ -4470,6 +4473,163 @@ FormatToken *TokenAnnotator::calculateInitializerColumnList(
     CurrentToken = CurrentToken->Next;
   }
   return CurrentToken;
+}
+
+void TokenAnnotator::markManuallyAlignedBracedLists(AnnotatedLine &Line) const {
+  // Walk the line looking for opening braces of braced-list initializers and
+  // decide, per heuristic, whether the user has manually aligned them in
+  // columns. If so, set IsArrayInitializer/IsManuallyAligned on the opening
+  // brace and MustBreakBefore on each row-start token, so the line formatter
+  // preserves the row structure for the subsequent WhitespaceManager pass.
+  const unsigned Threshold = Style.PreserveManualBracedListAlignment.AlignedRowPercent;
+  for (FormatToken *Tok = Line.First; Tok && Tok != Line.Last; Tok = Tok->Next) {
+    if (!Tok->is(tok::l_brace) || !Tok->is(BK_BracedInit))
+      continue;
+    FormatToken *RBrace = Tok->MatchingParen;
+    if (!RBrace || RBrace->isNot(tok::r_brace))
+      continue;
+    // Need multi-row layout: the closing brace must be on a different line
+    // from the opening brace in the original source.
+    if (RBrace->NewlinesBefore == 0) {
+      bool HasInteriorNewline = false;
+      for (const FormatToken *T = Tok->Next; T && T != RBrace; T = T->Next) {
+        if (T->NewlinesBefore > 0) {
+          HasInteriorNewline = true;
+          break;
+        }
+      }
+      if (!HasInteriorNewline)
+        continue;
+    }
+
+    // Collect per-row gap-start tokens. A gap-start is the first token of a
+    // row, or the token immediately following a comma within a row.
+    SmallVector<SmallVector<FormatToken *, 4>, 4> Rows;
+    SmallVector<FormatToken *, 4> RowStarts;
+    auto StartRow = [&](FormatToken *T) {
+      Rows.emplace_back();
+      Rows.back().push_back(T);
+      RowStarts.push_back(T);
+    };
+
+    FormatToken *FirstInRow = Tok->Next;
+    if (!FirstInRow || FirstInRow == RBrace)
+      continue;
+    StartRow(FirstInRow);
+    for (FormatToken *T = FirstInRow->Next; T && T != RBrace; T = T->Next) {
+      if (T->NewlinesBefore > 0) {
+        // Skip preprocessor directive lines: they don't participate.
+        if (T->is(tok::hash)) {
+          // Advance over the directive; the next token after a directive that
+          // has its own NewlinesBefore starts a new row.
+          continue;
+        }
+        StartRow(T);
+        continue;
+      }
+      // Same row: a token immediately following a comma is a gap-start.
+      if (T->Previous && T->Previous->is(tok::comma) && !Rows.empty())
+        Rows.back().push_back(T);
+    }
+
+    if (Rows.size() < 2)
+      continue;
+
+    // Determine candidate gap positions (indexed by column position within
+    // the row) and count how many rows agree on the OriginalColumn at each.
+    size_t MaxLen = 0;
+    for (auto &R : Rows)
+      MaxLen = std::max(MaxLen, R.size());
+    if (MaxLen < 2)
+      continue;
+
+    // List-level wide-gap guard: require at least one inter-token gap of
+    // more than one space somewhere in the list. The wide-gap signal is
+    // list-level intent, not a per-position requirement. Without this
+    // guard, canonical single-space code with same-width elements (which
+    // naturally aligns in columns) would be misidentified as manually
+    // aligned.
+    bool HasAnyWideGap = false;
+    for (auto &R : Rows) {
+      for (FormatToken *GT : R) {
+        if (GT->NewlinesBefore > 0)
+          continue; // Row-start: not an inter-token gap on this row.
+        if (!GT->Previous)
+          continue;
+        unsigned PrevEnd =
+            GT->Previous->OriginalColumn + GT->Previous->ColumnWidth;
+        if (GT->OriginalColumn > PrevEnd + 1) {
+          HasAnyWideGap = true;
+          break;
+        }
+      }
+      if (HasAnyWideGap)
+        break;
+    }
+    if (!HasAnyWideGap)
+      continue;
+
+    // Build the inferred grid: for each gap position, the majority column
+    // among rows that have a token at that position (only if a strict
+    // majority exists). Positions without a strict majority are left
+    // undefined and ignored when scoring rows.
+    SmallVector<int, 4> GridColumn(MaxLen, -1);
+    for (size_t I = 0; I < MaxLen; ++I) {
+      llvm::DenseMap<unsigned, unsigned> ColCounts;
+      unsigned Participants = 0;
+      for (auto &R : Rows) {
+        if (I >= R.size())
+          continue;
+        FormatToken *GT = R[I];
+        ++Participants;
+        ++ColCounts[GT->OriginalColumn];
+      }
+      if (Participants < 2)
+        continue;
+      unsigned BestCount = 0;
+      unsigned BestStart = 0;
+      for (auto &E : ColCounts) {
+        if (E.second > BestCount) {
+          BestCount = E.second;
+          BestStart = E.first;
+        }
+      }
+      // Require a strict majority of participating rows.
+      if (BestCount * 2 > Participants)
+        GridColumn[I] = static_cast<int>(BestStart);
+    }
+
+    // Score each row: a row is "aligned" if a strict majority of its
+    // defined positions (positions where the grid is defined AND the row
+    // has an element) agree with the grid column.
+    unsigned AlignedRows = 0;
+    for (auto &R : Rows) {
+      unsigned Defined = 0;
+      unsigned Agree = 0;
+      for (size_t I = 0; I < R.size(); ++I) {
+        if (GridColumn[I] < 0)
+          continue;
+        ++Defined;
+        if (static_cast<int>(R[I]->OriginalColumn) == GridColumn[I])
+          ++Agree;
+      }
+      if (Defined > 0 && Agree * 2 > Defined)
+        ++AlignedRows;
+    }
+
+    // Pass if fraction of aligned rows >= Threshold / 100.
+    if (AlignedRows * 100 < Rows.size() * Threshold)
+      continue;
+
+    // Heuristic passed: mark the opening brace and force breaks at row starts.
+    Tok->IsArrayInitializer = true;
+    Tok->IsManuallyAligned = true;
+    for (FormatToken *RS : RowStarts)
+      RS->MustBreakBefore = true;
+    // Also break before the closing brace if it sits on its own line.
+    if (RBrace->NewlinesBefore > 0)
+      RBrace->MustBreakBefore = true;
+  }
 }
 
 unsigned TokenAnnotator::splitPenalty(const AnnotatedLine &Line,
