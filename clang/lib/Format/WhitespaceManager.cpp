@@ -1234,8 +1234,6 @@ void WhitespaceManager::preserveManualBracedListAlignment() {
     bool FoundComplete = false;
     for (unsigned J = I + 1; J < E; ++J) {
       const auto *Tok = Changes[J].Tok;
-      if (Tok->is(tok::pp_define))
-        break;
       if (Tok == C.Tok->MatchingParen) {
         (void)tryPreserveBracedList(I, J + 1);
         I = J;
