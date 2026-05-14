@@ -4481,8 +4481,10 @@ void TokenAnnotator::markManuallyAlignedBracedLists(AnnotatedLine &Line) const {
   // columns. If so, set IsArrayInitializer/IsManuallyAligned on the opening
   // brace and MustBreakBefore on each row-start token, so the line formatter
   // preserves the row structure for the subsequent WhitespaceManager pass.
-  const unsigned Threshold = Style.PreserveManualBracedListAlignment.AlignedRowPercent;
-  for (FormatToken *Tok = Line.First; Tok && Tok != Line.Last; Tok = Tok->Next) {
+  const unsigned Threshold =
+      Style.PreserveManualBracedListAlignment.AlignedRowPercent;
+  for (FormatToken *Tok = Line.First; Tok && Tok != Line.Last;
+       Tok = Tok->Next) {
     if (!Tok->is(tok::l_brace) || !Tok->is(BK_BracedInit))
       continue;
     FormatToken *RBrace = Tok->MatchingParen;
