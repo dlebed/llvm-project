@@ -4494,6 +4494,35 @@ struct FormatStyle {
   /// \version 3.7
   PointerAlignmentStyle PointerAlignment;
 
+  /// Style of preserving the user's manual column alignment inside
+  /// positional braced-list initializers.
+  struct PreserveManualBracedListAlignmentStyle {
+    /// Whether manual-alignment preservation is enabled.
+    bool Enabled;
+    /// Percentage (0..100) of inter-row gap positions that must line up
+    /// (with more than one space) for a braced list to be considered
+    /// manually aligned and preserved.
+    unsigned AlignedRowPercent;
+    /// When the heuristic passes, normalize rows whose only deviation
+    /// from the inferred grid is whitespace. Rows containing a token
+    /// wider than the inferred column are always left as-is.
+    bool NormalizeRaggedRows;
+
+    bool operator==(const PreserveManualBracedListAlignmentStyle &R) const {
+      return Enabled == R.Enabled &&
+             AlignedRowPercent == R.AlignedRowPercent &&
+             NormalizeRaggedRows == R.NormalizeRaggedRows;
+    }
+    bool operator!=(const PreserveManualBracedListAlignmentStyle &R) const {
+      return !(*this == R);
+    }
+  };
+
+  /// Preserve manually aligned columns inside positional braced-list
+  /// initializers (arrays and structs).
+  /// \version 23
+  PreserveManualBracedListAlignmentStyle PreserveManualBracedListAlignment;
+
   /// The number of columns to use for indentation of preprocessor statements.
   /// When set to -1 (default) ``IndentWidth`` is used also for preprocessor
   /// statements.
@@ -6205,6 +6234,8 @@ struct FormatStyle {
            PenaltyExcessCharacter == R.PenaltyExcessCharacter &&
            PenaltyReturnTypeOnItsOwnLine == R.PenaltyReturnTypeOnItsOwnLine &&
            PointerAlignment == R.PointerAlignment &&
+           PreserveManualBracedListAlignment ==
+               R.PreserveManualBracedListAlignment &&
            QualifierAlignment == R.QualifierAlignment &&
            QualifierOrder == R.QualifierOrder &&
            RawStringFormats == R.RawStringFormats &&
