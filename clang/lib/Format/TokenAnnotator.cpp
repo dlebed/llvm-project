@@ -4543,29 +4543,44 @@ void TokenAnnotator::markManuallyAlignedBracedLists(AnnotatedLine &Line) const {
     if (MaxLen < 2)
       continue;
 
+    // List-level wide-gap guard: require at least one inter-token gap of
+    // more than one space somewhere in the list. The wide-gap signal is
+    // list-level intent, not a per-position requirement. Without this
+    // guard, canonical single-space code with same-width elements (which
+    // naturally aligns in columns) would be misidentified as manually
+    // aligned.
+    bool HasAnyWideGap = false;
+    for (auto &R : Rows) {
+      for (FormatToken *GT : R) {
+        if (GT->NewlinesBefore > 0)
+          continue; // Row-start: not an inter-token gap on this row.
+        if (!GT->Previous)
+          continue;
+        unsigned PrevEnd =
+            GT->Previous->OriginalColumn + GT->Previous->ColumnWidth;
+        if (GT->OriginalColumn > PrevEnd + 1) {
+          HasAnyWideGap = true;
+          break;
+        }
+      }
+      if (HasAnyWideGap)
+        break;
+    }
+    if (!HasAnyWideGap)
+      continue;
+
     unsigned Candidates = 0;
     unsigned Aligned = 0;
     for (size_t I = 0; I < MaxLen; ++I) {
-      // Collect (column, wide-gap) pairs for rows that have a token at I.
+      // Collect column counts for rows that have a token at I.
       llvm::DenseMap<unsigned, unsigned> ColCounts;
       unsigned Participants = 0;
-      unsigned WideGaps = 0;
       for (auto &R : Rows) {
         if (I >= R.size())
           continue;
         FormatToken *GT = R[I];
         ++Participants;
         ++ColCounts[GT->OriginalColumn];
-        // A "wide gap" means there's more than one space (or a newline)
-        // before this token in the original source.
-        if (GT->NewlinesBefore > 0) {
-          ++WideGaps; // Row-start: column placement is the alignment.
-        } else if (GT->Previous) {
-          unsigned PrevEnd =
-              GT->Previous->OriginalColumn + GT->Previous->ColumnWidth;
-          if (GT->OriginalColumn > PrevEnd + 1)
-            ++WideGaps;
-        }
       }
       if (Participants < 2)
         continue;
@@ -4574,9 +4589,9 @@ void TokenAnnotator::markManuallyAlignedBracedLists(AnnotatedLine &Line) const {
       unsigned MajorityCount = 0;
       for (auto &E : ColCounts)
         MajorityCount = std::max(MajorityCount, E.second);
-      // A position is "aligned" if a majority of rows share its column AND
-      // most rows used a wide gap before it.
-      if (MajorityCount * 2 > Participants && WideGaps * 2 > Participants)
+      // A position is "aligned" if a majority of rows share its column.
+      // The wide-gap signal is checked once at list level above.
+      if (MajorityCount * 2 > Participants)
         ++Aligned;
     }
 
