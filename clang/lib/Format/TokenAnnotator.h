@@ -267,6 +267,8 @@ private:
   FormatToken *calculateInitializerColumnList(AnnotatedLine &Line,
                                               FormatToken *CurrentToken,
                                               unsigned Depth) const;
+
+  void markManuallyAlignedBracedLists(AnnotatedLine &Line) const;
   FormatStyle::PointerAlignmentStyle
   getTokenReferenceAlignment(const FormatToken &PointerOrReference) const;
 
