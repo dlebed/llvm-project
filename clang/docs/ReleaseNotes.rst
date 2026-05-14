@@ -771,6 +771,9 @@ clang-format
   enum assignments without affecting other assignments.
 - Add ``BreakBeforeReturnType`` option to break before the function return
   type.
+- Add ``PreserveManualBracedListAlignment`` option to retain user-written
+  column alignment inside positional braced-list initializers (arrays and
+  structs).
 
 libclang
 --------
