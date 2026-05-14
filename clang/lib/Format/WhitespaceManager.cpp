@@ -1249,10 +1249,52 @@ void WhitespaceManager::preserveManualBracedListAlignment() {
 }
 
 bool WhitespaceManager::tryPreserveBracedList(unsigned Start, unsigned End) {
-  // Detection lands in Task 8.
+  if (Start >= End)
+    return false;
+  const auto *Open = Changes[Start].Tok;
+  if (!Open->IsManuallyAligned)
+    return false;
+
+  applyOriginalWhitespace(Start, End);
+  for (unsigned I = Start; I < End; ++I)
+    Changes[I].IsPreserved = true;
+
+  if (Style.PreserveManualBracedListAlignment.NormalizeRaggedRows)
+    normalizeRaggedRows(Start, End);
+
+  return true;
+}
+
+void WhitespaceManager::applyOriginalWhitespace(unsigned Start, unsigned End) {
+  for (unsigned I = Start; I < End; ++I) {
+    auto &C = Changes[I];
+    if (C.NewlinesBefore != 0)
+      continue; // Line breaks are handled by MustBreakBefore upstream.
+
+    SourceLocation Begin = C.OriginalWhitespaceRange.getBegin();
+    SourceLocation OEnd = C.OriginalWhitespaceRange.getEnd();
+    unsigned BeginOff = SourceMgr.getFileOffset(Begin);
+    unsigned EndOff = SourceMgr.getFileOffset(OEnd);
+    if (EndOff <= BeginOff)
+      continue;
+
+    StringRef Raw(SourceMgr.getCharacterData(Begin), EndOff - BeginOff);
+    unsigned Spaces = 0;
+    for (char Ch : Raw) {
+      if (Ch == '\t')
+        Spaces += Style.TabWidth ? Style.TabWidth : 1;
+      else if (Ch == ' ')
+        ++Spaces;
+      // Other chars (e.g. newline) don't appear when NewlinesBefore == 0.
+    }
+    C.Spaces = Spaces;
+  }
+}
+
+void WhitespaceManager::normalizeRaggedRows(unsigned Start, unsigned End) {
   (void)Start;
   (void)End;
-  return false;
+  // Task 9.
 }
 
 void WhitespaceManager::alignArrayInitializers() {

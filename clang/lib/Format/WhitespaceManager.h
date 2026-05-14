@@ -288,6 +288,15 @@ private:
   /// NormalizeRaggedRows is enabled) rewrites fixable ragged rows.
   bool tryPreserveBracedList(unsigned Start, unsigned End);
 
+  /// Replace the spacing of each Change in [Start, End) with the
+  /// whitespace the user originally wrote, recovered from
+  /// OriginalWhitespaceRange. Leaves newline-bearing Changes alone.
+  void applyOriginalWhitespace(unsigned Start, unsigned End);
+
+  /// Adjust whitespace-only ragged rows to land on the inferred grid.
+  /// Implemented in a follow-up task.
+  void normalizeRaggedRows(unsigned Start, unsigned End);
+
   /// Align Array Initializers over all \c Changes.
   void alignArrayInitializers();
 
