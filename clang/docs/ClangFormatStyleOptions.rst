@@ -6207,6 +6207,22 @@ the configuration (without a prefix: ``Auto``).
   Preserve manually aligned columns inside positional braced-list
   initializers (arrays and structs).
 
+  Detects multi-row layouts where the user has lined up commas or
+  values vertically with more than one space. When the heuristic
+  passes, the column layout is preserved and (by default) ragged
+  rows whose only deviation is whitespace are normalized to the
+  inferred grid.
+
+
+  .. code-block:: c++
+
+    // Preserved when Enabled is true (and heuristic passes):
+    int a[] = {
+        1,   2,   3,
+        10,  20,  30,
+        100, 200, 300,
+    };
+
   Nested configuration flags:
 
   Style of preserving the user's manual column alignment inside
