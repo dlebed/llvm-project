@@ -1228,7 +1228,31 @@ void WhitespaceManager::alignEscapedNewlines(unsigned Start, unsigned End,
 void WhitespaceManager::preserveManualBracedListAlignment() {
   if (!Style.PreserveManualBracedListAlignment.Enabled)
     return;
-  // Detection/preservation lands in Task 7+.
+
+  for (unsigned I = 1U, E = Changes.size(); I < E; ++I) {
+    auto &C = Changes[I];
+    if (!C.Tok->IsArrayInitializer)
+      continue;
+    bool FoundComplete = false;
+    for (unsigned J = I + 1; J < E; ++J) {
+      const auto *Tok = Changes[J].Tok;
+      if (Tok == C.Tok->MatchingParen) {
+        (void)tryPreserveBracedList(I, J + 1);
+        I = J;
+        FoundComplete = true;
+        break;
+      }
+    }
+    if (!FoundComplete)
+      return;
+  }
+}
+
+bool WhitespaceManager::tryPreserveBracedList(unsigned Start, unsigned End) {
+  // Detection lands in Task 8.
+  (void)Start;
+  (void)End;
+  return false;
 }
 
 void WhitespaceManager::alignArrayInitializers() {
