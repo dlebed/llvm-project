@@ -154,6 +154,10 @@ public:
     // directly after a newline.
     bool IsInsideToken;
 
+    /// When set, alignment passes must leave this Change's spacing alone.
+    /// Used by preserveManualBracedListAlignment().
+    bool IsPreserved = false;
+
     // \c IsTrailingComment, \c TokenLength, \c PreviousEndOfTokenColumn and
     // \c EscapedNewlineColumn will be calculated in
     // \c calculateLineBreakInformation.
