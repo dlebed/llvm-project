@@ -282,6 +282,12 @@ private:
   /// affected Changes so later passes skip them.
   void preserveManualBracedListAlignment();
 
+  /// Returns true iff the braced list spanning Changes [Start, End) has
+  /// manual column alignment that passes the configured heuristic.
+  /// On success, marks Changes in the span with IsPreserved and (when
+  /// NormalizeRaggedRows is enabled) rewrites fixable ragged rows.
+  bool tryPreserveBracedList(unsigned Start, unsigned End);
+
   /// Align Array Initializers over all \c Changes.
   void alignArrayInitializers();
 
